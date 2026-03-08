@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { words } from "@/data/words";
 
 const MAX_GUESSES = 6;
 const TURN_TIME = 30;
@@ -18,6 +17,8 @@ const opponentNames = [
 ];
 
 export default function Wordle() {
+  const [words, setWords] = useState<string[]>([]);
+
   const [target, setTarget] = useState("");
   const [wordLength, setWordLength] = useState(5);
   const [loading, setLoading] = useState(true);
@@ -32,22 +33,42 @@ export default function Wordle() {
   const playerName = "You";
 
   const [opponentName] = useState(
-    opponentNames[Math.floor(Math.random() * opponentNames.length)],
+    opponentNames[Math.floor(Math.random() * opponentNames.length)]
   );
+
+  /* ---------- LOAD WORDS ---------- */
+
+  useEffect(() => {
+    async function loadWords() {
+      const res = await fetch("/words.txt");
+      const text = await res.text();
+
+      const list = text
+        .split("\n")
+        .map((w) => w.trim().toLowerCase())
+        .filter((w) => w.length >= 3);
+
+      setWords(list);
+
+      const word = list[Math.floor(Math.random() * list.length)];
+      setTarget(word);
+      setWordLength(word.length);
+      setLoading(false);
+    }
+
+    loadWords();
+  }, []);
 
   /* ---------- RANDOM WORD ---------- */
 
   function getRandomWord() {
+    if (!words.length) return;
+
     const word = words[Math.floor(Math.random() * words.length)];
 
     setTarget(word);
     setWordLength(word.length);
-    setLoading(false);
   }
-
-  useEffect(() => {
-    getRandomWord();
-  }, []);
 
   /* ---------- LETTER COLOR ---------- */
 
@@ -134,14 +155,18 @@ export default function Wordle() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-white dark:bg-black text-black dark:text-white">
       <h1 className="text-3xl font-bold mb-4">Word Duel</h1>
+
       <div className="flex gap-10 mb-4 text-sm">
         <div>{playerName}</div>
         <div>{opponentName}</div>
       </div>
+
       <div className="mb-4 text-sm text-zinc-500">
         Guess the {wordLength}-letter word • {timer}s left
       </div>
+
       {/* BOARD */}
+
       <div className="space-y-2 mb-6">
         {[...Array(MAX_GUESSES)].map((_, row) => {
           const guess = guesses[row] || "";
@@ -170,6 +195,7 @@ export default function Wordle() {
           );
         })}
       </div>
+
       {!winner ? (
         <div className="flex gap-2 mb-6">
           <input
