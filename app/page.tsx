@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getSocket } from "@/lib/socket";
+import UsernameModal from "@/components/UsernameModal";
 
 type Game = {
   name: string;
@@ -17,32 +18,35 @@ const games: Game[] = [
 ];
 
 export default function Home() {
+
   const router = useRouter();
 
   const [online, setOnline] = useState<number>(0);
-  const [username, setUsername] = useState<string>("");
+  const [username, setUsername] = useState<string | null>(null);
 
   /* ---------------- USERNAME INIT ---------------- */
 
   useEffect(() => {
-    let name = localStorage.getItem("username");
 
-    if (!name) {
-      name = prompt("Enter your username") || "";
+    const stored = localStorage.getItem("username");
 
-      if (!name.trim()) {
-        name = "Player-" + Math.floor(Math.random() * 1000);
-      }
-
-      localStorage.setItem("username", name);
+    if (stored) {
+      setUsername(stored);
     }
 
-    setUsername(name);
   }, []);
+
+  function handleUsername(name: string) {
+
+    localStorage.setItem("username", name);
+    setUsername(name);
+
+  }
 
   /* ---------------- SOCKET CONNECTION ---------------- */
 
   useEffect(() => {
+
     const socket = getSocket();
 
     socket.off("onlineCount");
@@ -54,29 +58,32 @@ export default function Home() {
     return () => {
       socket.off("onlineCount");
     };
+
   }, []);
 
   /* ---------------- QUICK PLAY ---------------- */
 
-  const handleQuickPlay = () => {
+  function handleQuickPlay() {
+
     const randomGame = games[Math.floor(Math.random() * games.length)];
 
     router.push(`/games/${randomGame.slug}`);
-  };
 
-  /* ---------------- FAKE ONLINE COUNT (KEEP FOR LATER) ---------------- */
-
-  /*
-  useEffect(() => {
-    setOnline(Math.floor(Math.random() * 100) + 50);
-  }, []);
-  */
+  }
 
   /* ---------------- UI ---------------- */
 
   return (
+
     <main className="min-h-screen flex flex-col items-center justify-start pt-24 px-6 bg-white dark:bg-black text-black dark:text-white">
-      {/* USERNAME */}
+
+      {/* USERNAME MODAL */}
+
+      {!username && (
+        <UsernameModal onSubmit={handleUsername} />
+      )}
+
+      {/* USERNAME DISPLAY */}
 
       {username && (
         <div className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
@@ -86,7 +93,9 @@ export default function Home() {
 
       {/* HERO */}
 
-      <h1 className="text-5xl font-bold mb-4 tracking-tight">Quicky</h1>
+      <h1 className="text-5xl font-bold mb-4 tracking-tight">
+        Quicky
+      </h1>
 
       <p className="text-zinc-600 dark:text-zinc-400 mb-6">
         Play simple games with random people instantly
@@ -110,16 +119,25 @@ export default function Home() {
       {/* GAMES */}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+
         {games.map((game) => (
+
           <Link
             key={game.slug}
             href={`/games/${game.slug}`}
             className="w-64 h-36 rounded-xl flex items-center justify-center text-lg font-semibold border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:scale-105 transition"
           >
+
             {game.name}
+
           </Link>
+
         ))}
+
       </div>
+
     </main>
+
   );
+
 }
