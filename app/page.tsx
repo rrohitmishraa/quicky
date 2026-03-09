@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getSocket } from "@/lib/socket";
 
 type Game = {
   name: string;
@@ -16,38 +17,88 @@ const games: Game[] = [
 ];
 
 export default function Home() {
-  const [online, setOnline] = useState<number>(0);
   const router = useRouter();
+
+  const [online, setOnline] = useState<number>(0);
+  const [username, setUsername] = useState<string>("");
+
+  /* ---------------- USERNAME INIT ---------------- */
+
+  useEffect(() => {
+    let name = localStorage.getItem("username");
+
+    if (!name) {
+      name = prompt("Enter your username") || "";
+
+      if (!name.trim()) {
+        name = "Player-" + Math.floor(Math.random() * 1000);
+      }
+
+      localStorage.setItem("username", name);
+    }
+
+    setUsername(name);
+  }, []);
+
+  /* ---------------- SOCKET CONNECTION ---------------- */
+
+  useEffect(() => {
+    const socket = getSocket();
+
+    socket.off("onlineCount");
+
+    socket.on("onlineCount", (count: number) => {
+      setOnline(count);
+    });
+
+    return () => {
+      socket.off("onlineCount");
+    };
+  }, []);
+
+  /* ---------------- QUICK PLAY ---------------- */
 
   const handleQuickPlay = () => {
     const randomGame = games[Math.floor(Math.random() * games.length)];
+
     router.push(`/games/${randomGame.slug}`);
   };
 
+  /* ---------------- FAKE ONLINE COUNT (KEEP FOR LATER) ---------------- */
+
+  /*
   useEffect(() => {
     setOnline(Math.floor(Math.random() * 100) + 50);
   }, []);
+  */
+
+  /* ---------------- UI ---------------- */
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-start pt-28 px-6 bg-white dark:bg-black text-black dark:text-white">
+    <main className="min-h-screen flex flex-col items-center justify-start pt-24 px-6 bg-white dark:bg-black text-black dark:text-white">
+      {/* USERNAME */}
 
-      {/* Hero */}
+      {username && (
+        <div className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
+          Welcome, <span className="font-semibold">{username}</span>
+        </div>
+      )}
 
-      <h1 className="text-5xl font-bold mb-4 tracking-tight">
-        Quicky
-      </h1>
+      {/* HERO */}
+
+      <h1 className="text-5xl font-bold mb-4 tracking-tight">Quicky</h1>
 
       <p className="text-zinc-600 dark:text-zinc-400 mb-6">
         Play simple games with random people instantly
       </p>
 
-      {/* Online users */}
+      {/* ONLINE COUNT */}
 
       <div className="text-green-500 text-sm mb-10">
         ● {online} players online
       </div>
 
-      {/* Quick play */}
+      {/* QUICK PLAY */}
 
       <button
         onClick={handleQuickPlay}
@@ -56,10 +107,9 @@ export default function Home() {
         Play Now
       </button>
 
-      {/* Games */}
+      {/* GAMES */}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-
         {games.map((game) => (
           <Link
             key={game.slug}
@@ -69,9 +119,7 @@ export default function Home() {
             {game.name}
           </Link>
         ))}
-
       </div>
-
     </main>
   );
 }

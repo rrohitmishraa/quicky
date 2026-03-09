@@ -2,20 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { joinGame, sendMove, onMove, onGameStart } from "@/lib/multiplayer";
+import { useUsername } from "@/lib/useUsername";
 
 type Cell = "P" | "O" | null;
 
 const TURN_TIME = 30;
-
-const opponentNames = [
-  "Alex",
-  "Jordan",
-  "Taylor",
-  "Chris",
-  "Sam",
-  "Jamie",
-  "Morgan",
-];
+const MATCH_WAIT_TIME = 15000;
 
 const winPatterns = [
   [0, 1, 2],
@@ -29,29 +22,77 @@ const winPatterns = [
 ];
 
 export default function TicTacToe() {
+  const username = useUsername();
+
   const [board, setBoard] = useState<Cell[]>(Array(9).fill(null));
-  const [playerTurn, setPlayerTurn] = useState(true);
-  const [thinking, setThinking] = useState(false);
   const [winner, setWinner] = useState<Cell | "draw" | null>(null);
   const [winningCells, setWinningCells] = useState<number[]>([]);
+
+  const [playerTurn, setPlayerTurn] = useState(true);
+  const [thinking, setThinking] = useState(false);
   const [timer, setTimer] = useState(TURN_TIME);
 
-  const playerName = "You";
+  const [multiplayer, setMultiplayer] = useState(false);
+  const [searching, setSearching] = useState(true);
 
-  const [opponentName] = useState(
-    opponentNames[Math.floor(Math.random() * opponentNames.length)],
-  );
+  const [opponentName, setOpponentName] = useState("Opponent");
 
-  /* ---------------- WIN CHECK ---------------- */
+  const [showPopup, setShowPopup] = useState(false);
 
-  function checkWinner(
-    board: Cell[],
-  ): { winner: Cell | "draw"; cells: number[] } | null {
-    for (const pattern of winPatterns) {
-      const [a, b, c] = pattern;
+  const playerName = username;
 
+  /* MATCHMAKING */
+
+  useEffect(() => {
+    if (!username) return;
+
+    joinGame("tictactoe", username);
+
+    const waitTimer = setTimeout(() => {
+      if (!multiplayer) {
+        setSearching(false);
+      }
+    }, MATCH_WAIT_TIME);
+
+    onGameStart((data: any) => {
+      clearTimeout(waitTimer);
+
+      setMultiplayer(true);
+      setSearching(false);
+
+      const opponent = data.players.find((p: any) => p.name !== username);
+
+      if (opponent) {
+        setOpponentName(opponent.name);
+      }
+    });
+
+    onMove((index: number) => {
+      setBoard((prev) => {
+        const newBoard = [...prev];
+        newBoard[index] = "O";
+
+        const result = checkWinner(newBoard);
+
+        if (result) {
+          triggerWin(result);
+        }
+
+        return newBoard;
+      });
+
+      setPlayerTurn(true);
+      setThinking(false);
+      setTimer(TURN_TIME);
+    });
+  }, [username]);
+
+  /* WIN CHECK */
+
+  function checkWinner(board: Cell[]) {
+    for (const [a, b, c] of winPatterns) {
       if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        return { winner: board[a], cells: pattern };
+        return { winner: board[a], cells: [a, b, c] };
       }
     }
 
@@ -62,7 +103,18 @@ export default function TicTacToe() {
     return null;
   }
 
-  /* ---------------- MINIMAX AI ---------------- */
+  /* WIN HANDLER */
+
+  function triggerWin(result: any) {
+    setWinner(result.winner);
+    setWinningCells(result.cells);
+
+    setTimeout(() => {
+      setShowPopup(true);
+    }, 2000);
+  }
+
+  /* MINIMAX BOT */
 
   function minimax(newBoard: Cell[], player: Cell) {
     const result = checkWinner(newBoard);
@@ -84,9 +136,7 @@ export default function TicTacToe() {
 
       for (const i of moves) {
         newBoard[i] = "O";
-
         const score = minimax(newBoard, "P");
-
         newBoard[i] = null;
 
         best = Math.max(score, best);
@@ -98,9 +148,7 @@ export default function TicTacToe() {
 
       for (const i of moves) {
         newBoard[i] = "P";
-
         const score = minimax(newBoard, "O");
-
         newBoard[i] = null;
 
         best = Math.min(score, best);
@@ -117,9 +165,7 @@ export default function TicTacToe() {
     for (let i = 0; i < 9; i++) {
       if (!board[i]) {
         board[i] = "O";
-
         const score = minimax(board, "P");
-
         board[i] = null;
 
         if (score > bestScore) {
@@ -132,9 +178,10 @@ export default function TicTacToe() {
     return move;
   }
 
-  /* ---------------- PLAYER MOVE ---------------- */
+  /* PLAYER MOVE */
 
   function playerMove(index: number) {
+    if (searching) return;
     if (!playerTurn || thinking || winner) return;
     if (board[index]) return;
 
@@ -145,9 +192,12 @@ export default function TicTacToe() {
 
     setBoard(newBoard);
 
+    if (multiplayer) {
+      sendMove(index);
+    }
+
     if (result) {
-      setWinner(result.winner);
-      setWinningCells(result.cells);
+      triggerWin(result);
       return;
     }
 
@@ -155,12 +205,16 @@ export default function TicTacToe() {
     setThinking(true);
     setTimer(TURN_TIME);
 
-    const delay = 500 + Math.random() * 3500;
+    if (!multiplayer) {
+      const delay = 500 + Math.random() * 3500;
 
-    setTimeout(() => opponentMove(newBoard), delay);
+      setTimeout(() => {
+        opponentMove(newBoard);
+      }, delay);
+    }
   }
 
-  /* ---------------- OPPONENT MOVE ---------------- */
+  /* BOT MOVE */
 
   function opponentMove(currentBoard: Cell[]) {
     const newBoard = [...currentBoard];
@@ -176,8 +230,8 @@ export default function TicTacToe() {
     setBoard(newBoard);
 
     if (result) {
-      setWinner(result.winner);
-      setWinningCells(result.cells);
+      triggerWin(result);
+      return;
     }
 
     setPlayerTurn(true);
@@ -185,10 +239,10 @@ export default function TicTacToe() {
     setTimer(TURN_TIME);
   }
 
-  /* ---------------- TIMER ---------------- */
+  /* TIMER */
 
   useEffect(() => {
-    if (winner) return;
+    if (winner || searching) return;
 
     if (timer === 0) {
       if (playerTurn) {
@@ -197,7 +251,9 @@ export default function TicTacToe() {
 
         const delay = 500 + Math.random() * 2000;
 
-        setTimeout(() => opponentMove(board), delay);
+        setTimeout(() => {
+          opponentMove(board);
+        }, delay);
       } else {
         setPlayerTurn(true);
         setThinking(false);
@@ -211,11 +267,30 @@ export default function TicTacToe() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [timer, playerTurn, winner]);
+  }, [timer, playerTurn, winner, searching]);
 
-  /* ---------------- STATUS ---------------- */
+  /* RESTART */
+
+  function restart() {
+    setBoard(Array(9).fill(null));
+    setWinner(null);
+    setWinningCells([]);
+    setPlayerTurn(true);
+    setThinking(false);
+    setTimer(TURN_TIME);
+    setShowPopup(false);
+  }
+
+  function nextOpponent() {
+    setShowPopup(false);
+    window.location.reload();
+  }
+
+  /* STATUS */
 
   function status() {
+    if (searching) return "Waiting for a player to join...";
+
     if (winner === "P") return `${playerName} wins!`;
     if (winner === "O") return `${opponentName} wins!`;
     if (winner === "draw") return "Draw";
@@ -225,18 +300,7 @@ export default function TicTacToe() {
     return `${playerName}'s turn`;
   }
 
-  /* ---------------- RESTART ---------------- */
-
-  function restart() {
-    setBoard(Array(9).fill(null));
-    setWinner(null);
-    setWinningCells([]);
-    setPlayerTurn(true);
-    setThinking(false);
-    setTimer(TURN_TIME);
-  }
-
-  /* ---------------- UI ---------------- */
+  /* UI */
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-white dark:bg-black text-black dark:text-white">
@@ -253,8 +317,6 @@ export default function TicTacToe() {
 
       <p className="mb-6 text-zinc-600 dark:text-zinc-400">{status()}</p>
 
-      {/* Board */}
-
       <div className="grid grid-cols-3 gap-3">
         {board.map((cell, i) => {
           const isWinning = winningCells.includes(i);
@@ -270,9 +332,7 @@ export default function TicTacToe() {
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   transition={{ type: "spring", stiffness: 200 }}
-                  className={`${
-                    cell === "P" ? "text-red-500" : "text-yellow-500"
-                  } ${isWinning ? "animate-pulse text-green-500" : ""}`}
+                  className={`${cell === "P" ? "text-red-500" : "text-yellow-500"} ${isWinning ? "animate-pulse text-green-500" : ""}`}
                 >
                   {cell === "P" ? "X" : "O"}
                 </motion.div>
@@ -282,12 +342,31 @@ export default function TicTacToe() {
         })}
       </div>
 
-      <button
-        onClick={restart}
-        className="mt-8 px-6 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition"
-      >
-        Restart
-      </button>
+      {/* POPUP */}
+
+      {showPopup && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70">
+          <div className="bg-white dark:bg-zinc-900 p-8 rounded-xl text-center space-y-6">
+            <h2 className="text-xl font-semibold">{status()}</h2>
+
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={restart}
+                className="px-5 py-2 bg-green-500 text-black rounded-lg"
+              >
+                Rematch
+              </button>
+
+              <button
+                onClick={nextOpponent}
+                className="px-5 py-2 bg-blue-500 text-black rounded-lg"
+              >
+                Next Player
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
