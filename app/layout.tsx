@@ -11,7 +11,12 @@ const montserrat = Montserrat({
 export const metadata: Metadata = {
   title: "Quicky",
   description: "Play games with random people.",
+  icons: {
+    icon: "/logo.png",
+  },
 };
+
+
 
 export default function RootLayout({
   children,
