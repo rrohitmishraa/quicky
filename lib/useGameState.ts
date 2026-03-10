@@ -71,7 +71,7 @@ export function useGameState<T extends (string | null)[]>(
 
           // use server turn
           if (typeof turn === "number") {
-            setTurn(turn);
+            setTurn(turn as 0 | 1);
           } else {
             setTurn(0);
           }
@@ -144,7 +144,7 @@ export function useGameState<T extends (string | null)[]>(
 
           // set new turn
           if (typeof turn === "number") {
-            setTurn(turn);
+            setTurn(turn as 0 | 1);
           }
 
           break;
