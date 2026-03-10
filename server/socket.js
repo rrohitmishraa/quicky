@@ -4,96 +4,266 @@ const { Server } = require("socket.io");
 const httpServer = createServer();
 
 const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-  },
+  cors: { origin: "*" },
 });
 
 /* ---------------- PLAYER REGISTRY ---------------- */
 
-const players = new Set();
+const players = new Map();
+
+/*
+socketId → {
+  socket,
+  username,
+  roomId
+}
+*/
 
 /* ---------------- MATCHMAKING QUEUES ---------------- */
 
-const waiting = {};
+const queues = {};
+
+/* ---------------- GAME SESSIONS ---------------- */
+
+const sessions = {};
+
+/*
+roomId → {
+  game,
+  players: [username, username],
+  board,
+  createdAt,
+  reconnectTimer
+}
+*/
+
+/* ---------------- HELPERS ---------------- */
+
+function broadcastOnlineCount() {
+  io.emit("onlineCount", players.size);
+}
+
+function getPlayerByUsername(username) {
+  for (const player of players.values()) {
+    if (player.username === username) return player;
+  }
+  return null;
+}
+
+/* ---------------- CLEAN QUEUE ---------------- */
+
+function cleanQueue(game) {
+  if (!queues[game]) return;
+
+  queues[game] = queues[game].filter((id) => {
+    const player = players.get(id);
+    if (!player) return false;
+    if (player.roomId) return false;
+    return true;
+  });
+}
+
+/* ---------------- CREATE ROOM ---------------- */
+
+function createRoom(game, playerA, playerB) {
+  const roomId = `room-${Date.now()}-${Math.random()}`;
+
+  console.log(
+    "ROOM CREATED:",
+    roomId,
+    playerA.username,
+    "vs",
+    playerB.username,
+  );
+
+  sessions[roomId] = {
+    game,
+    players: [playerA.username, playerB.username],
+    board: Array(9).fill(null),
+    turn: 0,
+    createdAt: Date.now(),
+    reconnectTimer: null,
+  };
+
+  playerA.roomId = roomId;
+  playerB.roomId = roomId;
+
+  playerA.socket.join(roomId);
+  playerB.socket.join(roomId);
+
+  io.to(roomId).emit("gameStart", {
+    room: roomId,
+    players: [{ name: playerA.username }, { name: playerB.username }],
+  });
+}
+
+/* ---------------- MATCHMAKING ---------------- */
+
+function tryMatchmaking(game) {
+  if (!queues[game]) return;
+
+  // ensure queue only contains valid players
+  cleanQueue(game);
+
+  const queue = queues[game];
+
+  while (queue.length >= 2) {
+    const idA = queue.shift();
+    const idB = queue.shift();
+
+    const playerA = players.get(idA);
+    const playerB = players.get(idB);
+
+    if (!playerA || !playerB) {
+      console.log("Invalid players in queue, cleaning and retrying");
+      cleanQueue(game);
+      continue;
+    }
+
+    console.log("MATCH FOUND:", playerA.username, "vs", playerB.username);
+
+    createRoom(game, playerA, playerB);
+  }
+}
 
 /* ---------------- SOCKET CONNECTION ---------------- */
 
 io.on("connection", (socket) => {
   console.log("Player connected:", socket.id);
 
-  /* register player */
+  players.set(socket.id, {
+    socket,
+    username: null,
+    roomId: null,
+  });
 
-  players.add(socket.id);
-
-  io.emit("onlineCount", players.size);
-
-  socket.username = null;
-  socket.game = null;
-  socket.room = null;
+  broadcastOnlineCount();
 
   /* ---------------- JOIN GAME ---------------- */
 
   socket.on("joinGame", ({ game, username }) => {
-    socket.username = username;
-    socket.game = game;
+    console.log("JOIN GAME RECEIVED:", username, game);
+    const player = players.get(socket.id);
 
-    if (!waiting[game]) {
-      waiting[game] = [];
+    if (!player) return;
+
+    if (player.roomId) return;
+
+    player.username = username;
+
+    if (!queues[game]) queues[game] = [];
+
+    // remove stale or invalid queue entries
+    cleanQueue(game);
+
+    // prevent duplicate queue joins
+    if (!queues[game].includes(socket.id)) {
+      queues[game].push(socket.id);
     }
 
-    console.log(`${username} joined queue for ${game}`);
+    console.log("QUEUE", game, queues[game].length);
 
-    /* ---------- MATCH FOUND ---------- */
-
-    if (waiting[game].length > 0) {
-      const opponent = waiting[game].shift();
-
-      if (!opponent || opponent.disconnected) {
-        waiting[game].push(socket);
-        return;
-      }
-
-      const room = `room-${socket.id}-${opponent.id}`;
-
-      socket.room = room;
-      opponent.room = room;
-
-      socket.join(room);
-      opponent.join(room);
-
-      console.log(`Match created: ${room}`);
-
-      io.to(room).emit("gameStart", {
-        room,
-        players: [
-          { id: opponent.id, name: opponent.username },
-          { id: socket.id, name: socket.username },
-        ],
-      });
-    } else {
-      /* ---------- WAIT FOR PLAYER ---------- */
-
-      waiting[game].push(socket);
-
-      console.log(`Waiting for opponent in ${game}`);
-    }
+    tryMatchmaking(game);
   });
 
-  /* ---------------- PLAYER MOVE ---------------- */
+  /* ---------------- RECONNECT GAME ---------------- */
+
+  socket.on("reconnectGame", ({ roomId, username }) => {
+    const session = sessions[roomId];
+    if (!session) return;
+
+    if (!session.players.includes(username)) return;
+
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    player.username = username;
+    player.roomId = roomId;
+
+    socket.join(roomId);
+
+    if (session.reconnectTimer) {
+      clearTimeout(session.reconnectTimer);
+      session.reconnectTimer = null;
+    }
+
+    socket.to(roomId).emit("opponentReconnected");
+
+    socket.emit("reconnectSuccess", {
+      room: roomId,
+      players: session.players,
+      board: session.board,
+    });
+  });
+
+  /* ---------------- MOVE ---------------- */
 
   socket.on("move", ({ room, index }) => {
-    if (!room) return;
+    const session = sessions[room];
+    if (!session) return;
 
-    socket.to(room).emit("move", index);
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    // validate index
+    if (index < 0 || index > 8) return;
+
+    // prevent overwriting
+    if (session.board[index] !== null) return;
+
+    const playerIndex = session.players.indexOf(player.username);
+    if (playerIndex === -1) return;
+
+    // initialize turn if missing
+    if (session.turn === undefined) session.turn = 0;
+
+    // enforce turn
+    if (playerIndex !== session.turn) return;
+
+    const mark = playerIndex === 0 ? "P" : "O";
+
+    session.board[index] = mark;
+
+    // switch turn
+    session.turn = session.turn === 0 ? 1 : 0;
+
+    io.to(room).emit("move", {
+      index,
+      mark,
+      turn: session.turn,
+    });
   });
 
-  /* ---------------- REMATCH ---------------- */
+  /* ---------------- LEAVE ROOM ---------------- */
 
-  socket.on("rematchChoice", ({ room, choice }) => {
-    if (!room) return;
+  socket.on("leaveRoom", (roomId) => {
+    const session = sessions[roomId];
+    if (!session) return;
 
-    socket.to(room).emit("rematchUpdate", choice);
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    const username = player.username;
+
+    const opponentUsername = session.players.find((p) => p !== username);
+
+    const opponent = getPlayerByUsername(opponentUsername);
+
+    if (session.reconnectTimer) {
+      clearTimeout(session.reconnectTimer);
+      session.reconnectTimer = null;
+    }
+
+    socket.leave(roomId);
+
+    player.roomId = null;
+
+    if (opponent) {
+      opponent.socket.emit("opponentLeft");
+      opponent.roomId = null;
+    }
+
+    delete sessions[roomId];
   });
 
   /* ---------------- DISCONNECT ---------------- */
@@ -101,24 +271,41 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("Player disconnected:", socket.id);
 
-    /* remove from player registry */
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    const username = player.username;
+    const roomId = player.roomId;
 
     players.delete(socket.id);
 
-    io.emit("onlineCount", players.size);
+    broadcastOnlineCount();
 
-    const game = socket.game;
+    /* remove from queues */
 
-    /* remove from waiting queue */
+    Object.keys(queues).forEach((game) => {
+      queues[game] = queues[game].filter((id) => id !== socket.id);
+    });
 
-    if (game && waiting[game]) {
-      waiting[game] = waiting[game].filter((player) => player.id !== socket.id);
-    }
+    if (roomId && sessions[roomId]) {
+      const session = sessions[roomId];
 
-    /* notify opponent */
+      const opponentUsername = session.players.find((u) => u !== username);
 
-    if (socket.room) {
-      socket.to(socket.room).emit("opponentLeft");
+      const opponent = getPlayerByUsername(opponentUsername);
+
+      if (opponent) {
+        opponent.socket.emit("opponentDisconnected");
+
+        if (!session.reconnectTimer) {
+          session.reconnectTimer = setTimeout(() => {
+            if (sessions[roomId]) {
+              opponent.socket.emit("opponentLeft");
+              delete sessions[roomId];
+            }
+          }, 15000);
+        }
+      }
     }
   });
 });
