@@ -10,6 +10,7 @@ import {
   reconnectGame,
   getCurrentRoom,
   clearStoredRoom,
+  requestRematch,
 } from "./multiplayerEngine";
 
 export function useGameState<T extends (string | null)[]>(
@@ -27,8 +28,16 @@ export function useGameState<T extends (string | null)[]>(
   const [reconnectTimer, setReconnectTimer] = useState(15);
   const [turn, setTurn] = useState<0 | 1>(0);
   const [playerIndex, setPlayerIndex] = useState<0 | 1>(0);
+  const playerIndexRef = useRef<0 | 1>(0);
+  const [winner, setWinner] = useState<string | null>(null);
+  const [opponentWantsRematch, setOpponentWantsRematch] = useState(false);
+  const [rematchRequested, setRematchRequested] = useState(false);
 
   const joined = useRef(false);
+
+  useEffect(() => {
+    playerIndexRef.current = playerIndex;
+  }, [playerIndex]);
 
   /* ---------------- SOCKET EVENTS ---------------- */
 
@@ -37,6 +46,10 @@ export function useGameState<T extends (string | null)[]>(
       switch (event.type) {
         case "start": {
           setSearching(false);
+          setWinner(null);
+          setDisconnectState("none");
+          setRematchRequested(false);
+          setOpponentWantsRematch(false);
 
           const { players, board, turn } = event.data;
 
@@ -83,6 +96,56 @@ export function useGameState<T extends (string | null)[]>(
 
             return board;
           });
+
+          break;
+        }
+
+        case "gameOver": {
+          const { winner, board } = event.data;
+
+          if (board) {
+            setState([...board] as T);
+          }
+
+          if (winner === "draw") {
+            setWinner("draw");
+          } else {
+            // convert server winner to hero-view winner
+            const localMark = playerIndexRef.current === 0 ? "P" : "O";
+            const normalizedWinner = winner === localMark ? "P" : "O";
+            setWinner(normalizedWinner);
+          }
+
+          // wait for UI to ask player: rematch or next player
+          break;
+        }
+
+        case "opponentRematchRequested": {
+          setOpponentWantsRematch(true);
+          break;
+        }
+
+        case "rematchStart": {
+          const { board, turn } = event.data;
+
+          // reset board
+          if (board) {
+            setState([...board] as T);
+          } else {
+            setState([...initialState] as T);
+          }
+
+          // reset winner popup
+          setWinner(null);
+
+          // reset rematch request state
+          setOpponentWantsRematch(false);
+          setRematchRequested(false);
+
+          // set new turn
+          if (typeof turn === "number") {
+            setTurn(turn);
+          }
 
           break;
         }
@@ -192,6 +255,9 @@ export function useGameState<T extends (string | null)[]>(
     // reset board
     setState([...initialState] as T);
 
+    // clear winner popup for next match
+    setWinner(null);
+
     // reset opponent
     setOpponentName("Opponent");
 
@@ -208,6 +274,11 @@ export function useGameState<T extends (string | null)[]>(
     }
   }
 
+  function requestRematchAction() {
+    setRematchRequested(true);
+    requestRematch();
+  }
+
   /* ---------------- RETURN ---------------- */
 
   return {
@@ -218,10 +289,13 @@ export function useGameState<T extends (string | null)[]>(
     playerTurn: turn === playerIndex,
     multiplayer: !searching,
     searching,
-    winner: null,
+    winner,
+    opponentWantsRematch,
+    rematchRequested,
     disconnectState,
     reconnectTimer,
     playMove,
     leaveMatch,
+    requestRematch: requestRematchAction,
   };
 }

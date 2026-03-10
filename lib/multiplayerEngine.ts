@@ -32,6 +32,29 @@ function initSocket() {
     });
   });
 
+  socket.off("gameOver");
+  socket.on("gameOver", (data) => {
+    dispatch({
+      type: "gameOver",
+      data,
+    });
+  });
+
+  socket.off("rematchStart");
+  socket.on("rematchStart", (data) => {
+    dispatch({
+      type: "rematchStart",
+      data,
+    });
+  });
+
+  socket.off("opponentRematchRequested");
+  socket.on("opponentRematchRequested", () => {
+    dispatch({
+      type: "opponentRematchRequested",
+    });
+  });
+
   socket.off("turnUpdate");
   socket.on("turnUpdate", (data) => {
     dispatch({
@@ -117,6 +140,16 @@ export function sendMove(index: number) {
   emit("move", {
     room,
     index,
+  });
+}
+
+export function requestRematch() {
+  if (!room) return;
+
+  initSocket();
+
+  emit("requestRematch", {
+    room,
   });
 }
 

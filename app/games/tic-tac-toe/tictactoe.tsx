@@ -61,10 +61,13 @@ export default function TicTacToe() {
     searching,
     multiplayer,
     winner,
+    opponentWantsRematch,
+    rematchRequested,
     disconnectState,
     reconnectTimer,
     playMove,
     leaveMatch,
+    requestRematch,
   } = useGameState<Cell[]>(
     username,
     "tictactoe",
@@ -150,6 +153,12 @@ export default function TicTacToe() {
     return () => clearTimeout(timer);
   }, [winner]);
 
+  useEffect(() => {
+    if (!winner) {
+      setShowPopup(false);
+    }
+  }, [winner]);
+
   /* ---------------- UI ---------------- */
 
   return (
@@ -202,17 +211,51 @@ export default function TicTacToe() {
         <Modal
           title={status()}
           actions={
-            <button
-              onClick={leaveMatch}
-              className="px-5 py-2 bg-blue-500 text-black rounded-lg"
-            >
-              Next Player
-            </button>
+            <div className="flex gap-3">
+              {!rematchRequested && !opponentWantsRematch && (
+                <button
+                  onClick={requestRematch}
+                  className="px-5 py-2 bg-green-500 text-black rounded-lg"
+                >
+                  Rematch
+                </button>
+              )}
+
+              {opponentWantsRematch && !rematchRequested && (
+                <button
+                  onClick={requestRematch}
+                  className="px-5 py-2 bg-green-500 text-black rounded-lg"
+                >
+                  Accept Rematch
+                </button>
+              )}
+
+              <button
+                onClick={leaveMatch}
+                className="px-5 py-2 bg-blue-500 text-black rounded-lg"
+              >
+                Next Player
+              </button>
+            </div>
           }
         >
-          <p className="text-sm text-zinc-500">
-            Starting a new match will leave this one.
-          </p>
+          {!rematchRequested && !opponentWantsRematch && (
+            <p className="text-sm text-zinc-500">
+              Do you want a rematch or find the next player?
+            </p>
+          )}
+
+          {rematchRequested && (
+            <p className="text-sm text-zinc-500">
+              Waiting for opponent to accept rematch...
+            </p>
+          )}
+
+          {opponentWantsRematch && !rematchRequested && (
+            <p className="text-sm text-zinc-500">
+              Opponent wants a rematch.
+            </p>
+          )}
         </Modal>
       )}
 

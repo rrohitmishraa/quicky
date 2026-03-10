@@ -27,15 +27,47 @@ const queues = {};
 
 const sessions = {};
 
-/*
-roomId → {
-  game,
-  players: [username, username],
-  board,
-  createdAt,
-  reconnectTimer
+const WIN_PATTERNS = [
+  [0, 1, 2],
+  [3, 4, 5],
+  [6, 7, 8],
+  [0, 3, 6],
+  [1, 4, 7],
+  [2, 5, 8],
+  [0, 4, 8],
+  [2, 4, 6],
+];
+
+function checkWinner(board) {
+  for (const [a, b, c] of WIN_PATTERNS) {
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return board[a];
+    }
+  }
+
+  if (!board.includes(null)) return "draw";
+
+  return null;
 }
-*/
+
+function startTurnTimer(roomId) {
+  const session = sessions[roomId];
+  if (!session) return;
+
+  if (session.turnTimer) clearTimeout(session.turnTimer);
+
+  session.turnTimer = setTimeout(() => {
+    if (!sessions[roomId]) return;
+
+    // switch turn automatically
+    session.turn = session.turn === 0 ? 1 : 0;
+
+    io.to(roomId).emit("turnUpdate", { turn: session.turn });
+
+    // start next timer
+    startTurnTimer(roomId);
+  }, 30000);
+}
 
 /* ---------------- HELPERS ---------------- */
 
@@ -86,6 +118,7 @@ function createRoom(game, playerA, playerB) {
     turn: 0,
     createdAt: Date.now(),
     reconnectTimer: null,
+    rematchRequests: {},
   };
 
   playerA.roomId = roomId;
@@ -100,6 +133,8 @@ function createRoom(game, playerA, playerB) {
     board: sessions[roomId].board,
     turn: sessions[roomId].turn,
   });
+
+  startTurnTimer(roomId);
 }
 
 /* ---------------- MATCHMAKING ---------------- */
@@ -237,6 +272,19 @@ io.on("connection", (socket) => {
 
     session.board[index] = mark;
 
+    const result = checkWinner(session.board);
+
+    if (result) {
+      io.to(room).emit("gameOver", {
+        winner: result,
+        board: session.board,
+      });
+
+      if (session.turnTimer) clearTimeout(session.turnTimer);
+
+      return;
+    }
+
     // switch turn
     session.turn = session.turn === 0 ? 1 : 0;
 
@@ -245,6 +293,48 @@ io.on("connection", (socket) => {
       mark,
       turn: session.turn,
     });
+
+    startTurnTimer(room);
+  });
+
+  /* ---------------- REMATCH REQUEST ---------------- */
+
+  socket.on("requestRematch", ({ room }) => {
+    const session = sessions[room];
+    if (!session) return;
+
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    const username = player.username;
+
+    // record that this player wants a rematch
+    session.rematchRequests[username] = true;
+
+    const opponentUsername = session.players.find((p) => p !== username);
+
+    // notify opponent that a rematch was requested
+    const opponent = getPlayerByUsername(opponentUsername);
+    if (opponent) {
+      opponent.socket.emit("opponentRematchRequested");
+    }
+
+    // if both players requested rematch, reset the game
+    if (
+      session.rematchRequests[session.players[0]] &&
+      session.rematchRequests[session.players[1]]
+    ) {
+      session.board = Array(9).fill(null);
+      session.turn = 0;
+      session.rematchRequests = {};
+
+      io.to(room).emit("rematchStart", {
+        board: session.board,
+        turn: session.turn,
+      });
+
+      startTurnTimer(room);
+    }
   });
 
   /* ---------------- TURN TIMEOUT ---------------- */
