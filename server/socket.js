@@ -57,9 +57,12 @@ function cleanQueue(game) {
 
   queues[game] = queues[game].filter((id) => {
     const player = players.get(id);
+
+    // remove if player disconnected
     if (!player) return false;
-    if (player.roomId) return false;
-    return true;
+
+    // keep player if not already in a room
+    return player.roomId === null;
   });
 }
 
@@ -94,6 +97,8 @@ function createRoom(game, playerA, playerB) {
   io.to(roomId).emit("gameStart", {
     room: roomId,
     players: [{ name: playerA.username }, { name: playerB.username }],
+    board: sessions[roomId].board,
+    turn: sessions[roomId].turn,
   });
 }
 
@@ -104,8 +109,9 @@ function tryMatchmaking(game) {
 
   // ensure queue only contains valid players
   cleanQueue(game);
-
   const queue = queues[game];
+
+  console.log("QUEUE STATE:", queue);
 
   while (queue.length >= 2) {
     const idA = queue.shift();
@@ -147,6 +153,12 @@ io.on("connection", (socket) => {
 
     if (!player) return;
 
+    // if player thinks they are in a room but the session no longer exists, clear it
+    if (player.roomId && !sessions[player.roomId]) {
+      player.roomId = null;
+    }
+
+    // if still in a valid room, do not allow joining queue again
     if (player.roomId) return;
 
     player.username = username;
@@ -193,6 +205,7 @@ io.on("connection", (socket) => {
       room: roomId,
       players: session.players,
       board: session.board,
+      turn: session.turn,
     });
   });
 
@@ -230,6 +243,30 @@ io.on("connection", (socket) => {
     io.to(room).emit("move", {
       index,
       mark,
+      turn: session.turn,
+    });
+  });
+
+  /* ---------------- TURN TIMEOUT ---------------- */
+
+  socket.on("turnTimeout", ({ room }) => {
+    const session = sessions[room];
+    if (!session) return;
+
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    const playerIndex = session.players.indexOf(player.username);
+    if (playerIndex === -1) return;
+
+    // Only allow timeout from the player whose turn it currently is
+    if (playerIndex !== session.turn) return;
+
+    // switch turn
+    session.turn = session.turn === 0 ? 1 : 0;
+
+    // broadcast new turn to both players
+    io.to(room).emit("turnUpdate", {
       turn: session.turn,
     });
   });
@@ -287,7 +324,12 @@ io.on("connection", (socket) => {
       queues[game] = queues[game].filter((id) => id !== socket.id);
     });
 
-    if (roomId && sessions[roomId]) {
+    // If player was only waiting in matchmaking (no room), do nothing else
+    if (!roomId) {
+      return;
+    }
+
+    if (sessions[roomId]) {
       const session = sessions[roomId];
 
       const opponentUsername = session.players.find((u) => u !== username);

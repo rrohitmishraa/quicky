@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 
 import { useGameState } from "@/lib/useGameState";
 import { useUsername } from "@/lib/useUsername";
+import { getSocket } from "@/lib/socket";
+import { getCurrentRoom } from "@/lib/multiplayerEngine";
 import Modal from "@/components/Modal";
 
 type Cell = "P" | "O" | null;
@@ -12,7 +14,6 @@ type Cell = "P" | "O" | null;
 const TURN_TIME = 30;
 
 const initialBoard: Cell[] = Array(9).fill(null);
-const playerMark: Cell = "P";
 
 const winPatterns = [
   [0, 1, 2],
@@ -49,18 +50,13 @@ export default function TicTacToe() {
     return null;
   }
 
-  /* ---------------- APPLY MOVE ---------------- */
-
-  function applyMove(board: Cell[], index: number, player: "P" | "O") {
-    const newBoard = [...board];
-    newBoard[index] = player;
-    return newBoard;
-  }
 
   /* ---------------- MULTIPLAYER ENGINE ---------------- */
 
   const {
     state: board = initialBoard,
+    playerTurn,
+    playerIndex,
     opponentName,
     searching,
     multiplayer,
@@ -74,15 +70,6 @@ export default function TicTacToe() {
     "tictactoe",
     initialBoard
   );
-
-  // determine whose turn it is based on board state
-  const currentTurn =
-    board.filter((c) => c === "P").length ===
-      board.filter((c) => c === "O").length
-      ? "P"
-      : "O";
-
-  const playerTurn = currentTurn === playerMark;
 
 
   /* ---------------- STATUS ---------------- */
@@ -119,13 +106,37 @@ export default function TicTacToe() {
 
   /* ---------------- TIMER ---------------- */
 
+  // reset timer whenever the board changes (new turn)
   useEffect(() => {
+    setTimer(TURN_TIME);
+  }, [board]);
+
+  // countdown timer
+  useEffect(() => {
+    if (winner || searching) return;
+
     const interval = setInterval(() => {
-      setTimer((t) => (t <= 1 ? TURN_TIME : t - 1));
+      setTimer((t) => {
+        // when timer reaches 0, simply reset for next turn
+        if (t <= 1) {
+          // only the active player should trigger the timeout
+          if (playerTurn) {
+            const socket = getSocket();
+            const room = getCurrentRoom();
+
+            if (room) {
+              socket.emit("turnTimeout", { room });
+            }
+          }
+
+          return TURN_TIME;
+        }
+        return t - 1;
+      });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [winner, searching, board, playerTurn]);
 
   /* ---------------- POPUP TRIGGER ---------------- */
 
@@ -166,17 +177,22 @@ export default function TicTacToe() {
               onClick={() => playerMove(i)}
               className="w-24 h-24 flex items-center justify-center text-3xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-800 transition"
             >
-              {cell && (
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: "spring", stiffness: 200 }}
-                  className={`${cell === "P" ? "text-red-500" : "text-yellow-500"} ${isWinning ? "animate-pulse text-green-500" : ""
-                    }`}
-                >
-                  {cell === "P" ? "X" : "O"}
-                </motion.div>
-              )}
+              {cell && (() => {
+                // convert server mark to hero view
+                const serverIndex = cell === "P" ? 0 : 1;
+                const display = serverIndex === playerIndex ? "X" : "O";
+
+                return (
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 200 }}
+                    className={`${display === "X" ? "text-red-500" : "text-yellow-500"} ${isWinning ? "animate-pulse text-green-500" : ""}`}
+                  >
+                    {display}
+                  </motion.div>
+                );
+              })()}
             </button>
           );
         })}
@@ -205,7 +221,11 @@ export default function TicTacToe() {
           title="Opponent disconnected"
           actions={
             <button
-              onClick={leaveMatch}
+              type="button"
+              onClick={() => {
+                console.log("Leave Match clicked");
+                leaveMatch();
+              }}
               className="px-5 py-2 bg-red-500 text-black rounded-lg"
             >
               Leave Match

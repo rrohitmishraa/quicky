@@ -25,6 +25,8 @@ export function useGameState<T extends (string | null)[]>(
     "none",
   );
   const [reconnectTimer, setReconnectTimer] = useState(15);
+  const [turn, setTurn] = useState<0 | 1>(0);
+  const [playerIndex, setPlayerIndex] = useState<0 | 1>(0);
 
   const joined = useRef(false);
 
@@ -36,25 +38,58 @@ export function useGameState<T extends (string | null)[]>(
         case "start": {
           setSearching(false);
 
-          const opp = event.data.players.find((p: any) => p.name !== username);
+          const { players, board, turn } = event.data;
 
+          // use board from server if provided
+          if (board) {
+            setState([...board] as T);
+          } else {
+            setState([...initialState] as T);
+          }
+
+          // determine player index from server player list
+          const myIndex = players.findIndex((p: any) => p.name === username);
+          if (myIndex !== -1) {
+            setPlayerIndex(myIndex as 0 | 1);
+          }
+
+          const opp = players.find((p: any) => p.name !== username);
           if (opp) setOpponentName(opp.name);
+
+          // use server turn
+          if (typeof turn === "number") {
+            setTurn(turn);
+          } else {
+            setTurn(0);
+          }
+
           break;
         }
 
         case "move": {
-          const { index, mark } = event.data;
+          const { index, mark, turn } = event.data;
+          setTurn(turn);
 
           setState((prev) => {
             const board = [...prev] as T;
 
             if (board[index] !== null) return prev;
 
-            board[index] = mark;
+            // normalize marks so local player is always "P"
+            const localMark = playerIndex === 0 ? "P" : "O";
+            const normalized = mark === localMark ? "P" : "O";
+
+            board[index] = normalized;
 
             return board;
           });
 
+          break;
+        }
+
+        case "turn": {
+          // server forced a turn change (e.g., timer timeout)
+          setTurn(event.turn);
           break;
         }
 
@@ -100,7 +135,11 @@ export function useGameState<T extends (string | null)[]>(
     };
 
     subscribe(listener);
-    if (!username || username === "Opponent") return;
+
+    if (!username || username === "Opponent") {
+      return () => unsubscribe(listener);
+    }
+
     console.log("Attempting matchmaking with:", username);
 
     if (!joined.current) {
@@ -128,31 +167,45 @@ export function useGameState<T extends (string | null)[]>(
   function playMove(index: number) {
     if (searching) return;
 
-    setState((prev) => {
-      const board = [...prev] as T;
+    // only allow move if it is this client's turn
+    if (turn !== playerIndex) return;
 
-      if (board[index] !== null) return prev;
-
-      board[index] = "P";
-
-      return board;
-    });
-
+    // send move to server; server will broadcast the update
     sendMove(index);
   }
 
   /* ---------------- LEAVE MATCH ---------------- */
 
   function leaveMatch() {
+    console.log("leaveMatch running");
+
+    // notify server if still connected
     leaveGame();
 
+    // clear local room state
     clearStoredRoom();
 
+    // reset disconnect state
+    setDisconnectState("none");
+    setReconnectTimer(15);
+
+    // reset board
+    setState([...initialState] as T);
+
+    // reset opponent
+    setOpponentName("Opponent");
+
+    // allow matchmaking again
     joined.current = false;
 
+    // start searching again
     setSearching(true);
-    setOpponentName("Opponent");
-    setState([...initialState] as T);
+
+    if (username) {
+      console.log("Rejoining matchmaking...");
+      joinGame(game, username);
+      joined.current = true;
+    }
   }
 
   /* ---------------- RETURN ---------------- */
@@ -160,7 +213,9 @@ export function useGameState<T extends (string | null)[]>(
   return {
     state,
     opponentName,
-    playerTurn: true,
+    turn,
+    playerIndex,
+    playerTurn: turn === playerIndex,
     multiplayer: !searching,
     searching,
     winner: null,

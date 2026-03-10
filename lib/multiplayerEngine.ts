@@ -32,6 +32,14 @@ function initSocket() {
     });
   });
 
+  socket.off("turnUpdate");
+  socket.on("turnUpdate", (data) => {
+    dispatch({
+      type: "turn",
+      turn: data.turn,
+    });
+  });
+
   socket.off("opponentDisconnected");
   socket.on("opponentDisconnected", () => {
     dispatch({
@@ -79,7 +87,10 @@ function dispatch(data: any) {
 }
 
 export function subscribe(listener: Listener) {
-  listeners.push(listener);
+  // avoid duplicate subscriptions
+  if (!listeners.includes(listener)) {
+    listeners.push(listener);
+  }
   initSocket();
 }
 
@@ -88,18 +99,20 @@ export function unsubscribe(listener: Listener) {
 }
 
 export function joinGame(game: string, username: string) {
-  console.log("CLIENT joinGame:", game, username);
-
   initSocket();
 
-  const socket = getSocket();
-  console.log("Socket id:", socket.id);
+  // clear any stale room from previous sessions
+  room = null;
+  sessionStorage.removeItem("currentRoom");
 
+  const socket = getSocket();
   socket.emit("joinGame", { game, username });
 }
 
 export function sendMove(index: number) {
   if (!room) return;
+
+  initSocket();
 
   emit("move", {
     room,
@@ -109,6 +122,8 @@ export function sendMove(index: number) {
 
 export function leaveGame() {
   if (!room) return;
+
+  initSocket();
 
   emit("leaveRoom", room);
 
