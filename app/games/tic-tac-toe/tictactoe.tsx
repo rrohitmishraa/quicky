@@ -84,7 +84,7 @@ export default function TicTacToe() {
       return `Opponent disconnected (reconnect in ${reconnectTimer}s)`;
     }
 
-    if (winner === "P") return `${username} wins!`;
+    if (winner === "P") return `You Win!`;
     if (winner === "O") return `${opponentName} wins!`;
     if (winner === "draw") return "Draw";
 
@@ -92,7 +92,7 @@ export default function TicTacToe() {
       return "Game starting...";
     }
 
-    return playerTurn ? `${username}'s turn` : `${opponentName}'s turn`;
+    return playerTurn ? `Your turn` : `${opponentName}'s turn`;
   }
 
   /* ---------------- PLAYER MOVE ---------------- */
@@ -166,7 +166,7 @@ export default function TicTacToe() {
       <h1 className="text-3xl font-bold mb-4">Tic Tac Toe</h1>
 
       <div className="flex gap-10 mb-4 text-sm">
-        <div>{username} (X)</div>
+        <div>You (X)</div>
         <div>{opponentName} (O)</div>
       </div>
 
