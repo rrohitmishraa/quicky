@@ -1,6 +1,10 @@
-
+import { Suspense } from "react";
 import RPS from "./rps";
 
-export default function Game() {
-  return <RPS />
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <RPS />
+    </Suspense>
+  );
 }

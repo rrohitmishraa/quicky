@@ -1,7 +1,10 @@
-import WordlePage from "./wordle";
+import { Suspense } from "react";
+import Wordle from "./wordle";
 
-export default function Game() {
+export default function Page() {
   return (
-    <WordlePage />
+    <Suspense fallback={null}>
+      <Wordle />
+    </Suspense>
   );
 }

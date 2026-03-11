@@ -1,5 +1,10 @@
-import TTT from "./tictactoe";
+import { Suspense } from "react";
+import TicTacToe from "./tictactoe";
 
-export default function Game() {
-  return <TTT />
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <TicTacToe />
+    </Suspense>
+  );
 }
