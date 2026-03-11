@@ -1,5 +1,20 @@
 const { createServer } = require("http");
 const { Server } = require("socket.io");
+const { nanoid } = require("nanoid");
+
+const fs = require("fs");
+const path = require("path");
+
+const games = {};
+
+const gamesPath = path.join(__dirname, "games");
+
+fs.readdirSync(gamesPath).forEach((file) => {
+  if (file.endsWith(".js")) {
+    const name = file.replace(".js", "");
+    games[name] = require(`./games/${file}`);
+  }
+});
 
 const httpServer = createServer();
 
@@ -27,29 +42,6 @@ const queues = {};
 
 const sessions = {};
 
-const WIN_PATTERNS = [
-  [0, 1, 2],
-  [3, 4, 5],
-  [6, 7, 8],
-  [0, 3, 6],
-  [1, 4, 7],
-  [2, 5, 8],
-  [0, 4, 8],
-  [2, 4, 6],
-];
-
-function checkWinner(board) {
-  for (const [a, b, c] of WIN_PATTERNS) {
-    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-      return board[a];
-    }
-  }
-
-  if (!board.includes(null)) return "draw";
-
-  return null;
-}
-
 function startTurnTimer(roomId) {
   const session = sessions[roomId];
   if (!session) return;
@@ -60,9 +52,9 @@ function startTurnTimer(roomId) {
     if (!sessions[roomId]) return;
 
     // switch turn automatically
-    session.turn = session.turn === 0 ? 1 : 0;
+    session.state.turn = session.state.turn === 0 ? 1 : 0;
 
-    io.to(roomId).emit("turnUpdate", { turn: session.turn });
+    io.to(roomId).emit("turnUpdate", { turn: session.state.turn });
 
     // start next timer
     startTurnTimer(roomId);
@@ -101,7 +93,7 @@ function cleanQueue(game) {
 /* ---------------- CREATE ROOM ---------------- */
 
 function createRoom(game, playerA, playerB) {
-  const roomId = `room-${Date.now()}-${Math.random()}`;
+  const roomId = nanoid(6);
 
   console.log(
     "ROOM CREATED:",
@@ -114,8 +106,7 @@ function createRoom(game, playerA, playerB) {
   sessions[roomId] = {
     game,
     players: [playerA.username, playerB.username],
-    board: Array(9).fill(null),
-    turn: 0,
+    state: games[game].createGame(),
     createdAt: Date.now(),
     reconnectTimer: null,
     rematchRequests: {},
@@ -130,8 +121,8 @@ function createRoom(game, playerA, playerB) {
   io.to(roomId).emit("gameStart", {
     room: roomId,
     players: [{ name: playerA.username }, { name: playerB.username }],
-    board: sessions[roomId].board,
-    turn: sessions[roomId].turn,
+    board: sessions[roomId].state.board,
+    turn: sessions[roomId].state.turn,
   });
 
   startTurnTimer(roomId);
@@ -239,8 +230,8 @@ io.on("connection", (socket) => {
     socket.emit("reconnectSuccess", {
       room: roomId,
       players: session.players,
-      board: session.board,
-      turn: session.turn,
+      board: session.state.board,
+      turn: session.state.turn,
     });
   });
 
@@ -253,31 +244,25 @@ io.on("connection", (socket) => {
     const player = players.get(socket.id);
     if (!player) return;
 
-    // validate index
-    if (index < 0 || index > 8) return;
-
-    // prevent overwriting
-    if (session.board[index] !== null) return;
-
     const playerIndex = session.players.indexOf(player.username);
     if (playerIndex === -1) return;
 
-    // initialize turn if missing
-    if (session.turn === undefined) session.turn = 0;
+    if (playerIndex !== session.state.turn) return;
 
-    // enforce turn
-    if (playerIndex !== session.turn) return;
+    const gameLogic = games[session.game];
 
-    const mark = playerIndex === 0 ? "P" : "O";
+    const resultMove = gameLogic.makeMove(session.state, playerIndex, index);
 
-    session.board[index] = mark;
+    if (!resultMove) return;
 
-    const result = checkWinner(session.board);
+    const { mark } = resultMove;
+
+    const result = gameLogic.checkWinner(session.state);
 
     if (result) {
       io.to(room).emit("gameOver", {
         winner: result,
-        board: session.board,
+        board: session.state.board,
       });
 
       if (session.turnTimer) clearTimeout(session.turnTimer);
@@ -286,12 +271,12 @@ io.on("connection", (socket) => {
     }
 
     // switch turn
-    session.turn = session.turn === 0 ? 1 : 0;
+    session.state.turn = session.state.turn === 0 ? 1 : 0;
 
     io.to(room).emit("move", {
       index,
       mark,
-      turn: session.turn,
+      turn: session.state.turn,
     });
 
     startTurnTimer(room);
@@ -324,13 +309,12 @@ io.on("connection", (socket) => {
       session.rematchRequests[session.players[0]] &&
       session.rematchRequests[session.players[1]]
     ) {
-      session.board = Array(9).fill(null);
-      session.turn = 0;
+      session.state = games[session.game].createGame();
       session.rematchRequests = {};
 
       io.to(room).emit("rematchStart", {
-        board: session.board,
-        turn: session.turn,
+        board: session.state.board,
+        turn: session.state.turn,
       });
 
       startTurnTimer(room);
@@ -350,14 +334,14 @@ io.on("connection", (socket) => {
     if (playerIndex === -1) return;
 
     // Only allow timeout from the player whose turn it currently is
-    if (playerIndex !== session.turn) return;
+    if (playerIndex !== session.state.turn) return;
 
     // switch turn
-    session.turn = session.turn === 0 ? 1 : 0;
+    session.state.turn = session.state.turn === 0 ? 1 : 0;
 
     // broadcast new turn to both players
     io.to(room).emit("turnUpdate", {
-      turn: session.turn,
+      turn: session.state.turn,
     });
   });
 
@@ -391,6 +375,65 @@ io.on("connection", (socket) => {
     }
 
     delete sessions[roomId];
+  });
+
+  /* ---------------- CREATE PRIVATE ROOM ---------------- */
+
+  socket.on("createRoom", ({ game, username }) => {
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    player.username = username;
+
+    const roomId = nanoid(6);
+
+    sessions[roomId] = {
+      game,
+      players: [username],
+      state: games[game].createGame(),
+      createdAt: Date.now(),
+      reconnectTimer: null,
+      rematchRequests: {},
+    };
+
+    player.roomId = roomId;
+
+    socket.join(roomId);
+
+    socket.emit("roomCreated", {
+      room: roomId,
+    });
+  });
+
+  /* ---------------- JOIN PRIVATE ROOM ---------------- */
+
+  socket.on("joinRoom", ({ roomId, username }) => {
+    const session = sessions[roomId];
+    if (!session) return;
+
+    if (session.players.length >= 2) return;
+
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    player.username = username;
+    player.roomId = roomId;
+
+    session.players.push(username);
+
+    socket.join(roomId);
+
+    const playerA = session.players[0];
+    const playerB = session.players[1];
+
+    io.to(roomId).emit("gameStart", {
+      room: roomId,
+      players: [{ name: playerA }, { name: playerB }],
+      board: session.state.board,
+      turn: session.state.turn,
+    });
+
+    startTurnTimer(roomId);
   });
 
   /* ---------------- DISCONNECT ---------------- */

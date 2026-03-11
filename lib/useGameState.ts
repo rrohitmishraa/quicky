@@ -33,6 +33,7 @@ export function useGameState<T extends (string | null)[]>(
   const [opponentWantsRematch, setOpponentWantsRematch] = useState(false);
   const [rematchRequested, setRematchRequested] = useState(false);
 
+  const [roomLink, setRoomLink] = useState<string | null>(null);
   const joined = useRef(false);
 
   useEffect(() => {
@@ -97,6 +98,11 @@ export function useGameState<T extends (string | null)[]>(
             return board;
           });
 
+          break;
+        }
+
+        case "roomCreated": {
+          setRoomLink(event.link);
           break;
         }
 
@@ -290,6 +296,7 @@ export function useGameState<T extends (string | null)[]>(
     multiplayer: !searching,
     searching,
     winner,
+    roomLink,
     opponentWantsRematch,
     rematchRequested,
     disconnectState,

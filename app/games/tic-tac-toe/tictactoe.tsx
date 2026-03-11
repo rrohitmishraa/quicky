@@ -6,15 +6,18 @@ import { motion } from "framer-motion";
 import { useGameState } from "@/lib/useGameState";
 import { useUsername } from "@/lib/useUsername";
 import { getSocket } from "@/lib/socket";
-import { getCurrentRoom } from "@/lib/multiplayerEngine";
 import Modal from "@/components/Modal";
+
+import RoomLobby from "@/components/RoomLobby";
+
+import { useSearchParams } from "next/navigation";
+import { getCurrentRoom, joinPrivateRoom, createPrivateRoom } from "@/lib/multiplayerEngine";
 
 type Cell = "P" | "O" | null;
 
 const TURN_TIME = 30;
 
 const initialBoard: Cell[] = Array(9).fill(null);
-
 const winPatterns = [
   [0, 1, 2],
   [3, 4, 5],
@@ -26,30 +29,18 @@ const winPatterns = [
   [2, 4, 6],
 ];
 
+
 export default function TicTacToe() {
   const username = useUsername();
 
   const [timer, setTimer] = useState(TURN_TIME);
   const [winningCells, setWinningCells] = useState<number[]>([]);
   const [showPopup, setShowPopup] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  /* ---------------- WIN CHECK ---------------- */
-
-  function checkWinner(board: Cell[]) {
-    for (const [a, b, c] of winPatterns) {
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        setWinningCells([a, b, c]);
-        return { winner: board[a] };
-      }
-    }
-
-    if (!board.includes(null)) {
-      return { winner: "draw" };
-    }
-
-    return null;
-  }
-
+  const params = useSearchParams();
+  const roomFromUrl = params.get("room");
 
   /* ---------------- MULTIPLAYER ENGINE ---------------- */
 
@@ -61,6 +52,7 @@ export default function TicTacToe() {
     searching,
     multiplayer,
     winner,
+    roomLink,
     opponentWantsRematch,
     rematchRequested,
     disconnectState,
@@ -68,12 +60,47 @@ export default function TicTacToe() {
     playMove,
     leaveMatch,
     requestRematch,
-  } = useGameState<Cell[]>(
-    username,
-    "tictactoe",
-    initialBoard
-  );
+  } = useGameState<Cell[]>(username, "tictactoe", initialBoard);
 
+  const roomCode = roomFromUrl ?? (roomLink ? roomLink.split("room=")[1] : null);
+
+  const effectiveRoomLink =
+    roomLink ??
+    (roomFromUrl
+      ? `${typeof window !== "undefined" ? window.location.origin + window.location.pathname : ""}?room=${roomFromUrl}`
+      : null);
+
+  const isCreator =
+    typeof window !== "undefined" &&
+    sessionStorage.getItem("roomCreator") === "true";
+
+  const hasPrivateRoom = Boolean(roomLink || roomFromUrl);
+
+  useEffect(() => {
+    if (!winner) {
+      setWinningCells([]);
+      return;
+    }
+
+    for (const [a, b, c] of winPatterns) {
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+        setWinningCells([a, b, c]);
+        return;
+      }
+    }
+  }, [winner, board]);
+
+  useEffect(() => {
+    // only the room creator has roomLink
+    if (!roomLink) return;
+
+    navigator.clipboard.writeText(roomLink)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => { });
+  }, [roomLink]);
 
   /* ---------------- STATUS ---------------- */
 
@@ -141,6 +168,10 @@ export default function TicTacToe() {
     return () => clearInterval(interval);
   }, [winner, searching, board, playerTurn]);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   /* ---------------- POPUP TRIGGER ---------------- */
 
   useEffect(() => {
@@ -159,10 +190,39 @@ export default function TicTacToe() {
     }
   }, [winner]);
 
+  useEffect(() => {
+    if (!roomFromUrl || !username) return;
+
+    // If this client already created or joined a room, do not re-join.
+    const existingRoom = getCurrentRoom();
+    if (existingRoom) return;
+
+    joinPrivateRoom(roomFromUrl, username);
+  }, [roomFromUrl, username]);
+
   /* ---------------- UI ---------------- */
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-white dark:bg-black text-black dark:text-white">
+      {mounted && (
+        <RoomLobby
+          roomLink={roomLink}
+          roomCode={roomCode}
+          multiplayer={multiplayer}
+          copied={copied}
+          setCopied={setCopied}
+          effectiveRoomLink={effectiveRoomLink}
+          hasPrivateRoom={hasPrivateRoom}
+          isCreator={isCreator}
+          createRoom={() => createPrivateRoom("tictactoe", username)}
+          leaveMatch={() => {
+            leaveMatch();
+            const cleanUrl = window.location.pathname;
+            window.history.replaceState({}, "", cleanUrl);
+          }}
+        />
+      )}
+
       <h1 className="text-3xl font-bold mb-4">Tic Tac Toe</h1>
 
       <div className="flex gap-10 mb-4 text-sm">
@@ -179,7 +239,6 @@ export default function TicTacToe() {
       <div className="grid grid-cols-3 gap-3">
         {board.map((cell, i) => {
           const isWinning = winningCells.includes(i);
-
           return (
             <button
               key={i}
@@ -196,13 +255,15 @@ export default function TicTacToe() {
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 200 }}
-                    className={`${display === "X" ? "text-red-500" : "text-yellow-500"} ${isWinning ? "animate-pulse text-green-500" : ""}`}
+                    className={`${display === "X" ? "text-red-500" : "text-yellow-500"} ${isWinning ? "animate-pulse text-green-500" : ""
+                      }`}
                   >
                     {display}
                   </motion.div>
                 );
               })()}
             </button>
+
           );
         })}
       </div>

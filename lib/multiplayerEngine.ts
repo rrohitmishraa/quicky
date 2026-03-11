@@ -13,6 +13,23 @@ function initSocket() {
 
   const socket = getSocket();
 
+  socket.off("roomCreated");
+  socket.on("roomCreated", (data) => {
+    room = data.room;
+
+    sessionStorage.setItem("currentRoom", data.room);
+    sessionStorage.setItem("roomCreator", "true"); // important
+
+    const url = `${window.location.origin}${window.location.pathname}?room=${data.room}`;
+    window.history.replaceState({}, "", url);
+
+    dispatch({
+      type: "roomCreated",
+      room: data.room,
+      link: url,
+    });
+  });
+
   socket.off("gameStart");
   socket.on("gameStart", (data) => {
     room = data.room;
@@ -132,6 +149,28 @@ export function joinGame(game: string, username: string) {
   socket.emit("joinGame", { game, username });
 }
 
+export function createPrivateRoom(game: string, username: string) {
+  initSocket();
+
+  const socket = getSocket();
+
+  socket.emit("createRoom", {
+    game,
+    username,
+  });
+}
+
+export function joinPrivateRoom(roomId: string, username: string) {
+  initSocket();
+
+  const socket = getSocket();
+
+  socket.emit("joinRoom", {
+    roomId,
+    username,
+  });
+}
+
 export function sendMove(index: number) {
   if (!room) return;
 
@@ -159,6 +198,8 @@ export function leaveGame() {
   initSocket();
 
   emit("leaveRoom", room);
+
+  sessionStorage.removeItem("roomCreator");
 
   room = null;
 }

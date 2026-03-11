@@ -6,6 +6,7 @@
     "start": "node socket.js"
   },
   "dependencies": {
+    "nanoid": "^5.1.6",
     "socket.io": "^4.7.5"
   }
 }

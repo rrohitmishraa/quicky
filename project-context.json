@@ -1,0 +1,257 @@
+{
+  "project": {
+    "name": "Quicky",
+    "type": "Realtime multiplayer browser game platform",
+    "description": "Quicky is a realtime multiplayer platform where players can instantly play simple games with random opponents or through private room links. The platform is designed so new games can be added easily without modifying the core multiplayer engine.",
+    "core_principles": [
+      "Server authoritative gameplay",
+      "Game plugin architecture",
+      "Reusable multiplayer engine",
+      "Realtime Socket.IO communication",
+      "Minimal latency user experience"
+    ]
+  },
+
+  "tech_stack": {
+    "frontend": {
+      "framework": "Next.js (App Router)",
+      "language": "TypeScript",
+      "ui_library": "React",
+      "animations": "Framer Motion",
+      "styling": "TailwindCSS"
+    },
+    "backend": {
+      "runtime": "Node.js",
+      "realtime_engine": "Socket.IO",
+      "server_entry": "server/socket.js"
+    }
+  },
+
+  "directory_structure": {
+    "app": {
+      "purpose": "Next.js frontend application",
+      "games": {
+        "tic-tac-toe": {
+          "page.tsx": "Next.js route entry for TicTacToe",
+          "tictactoe.tsx": "Main UI and game client logic"
+        },
+        "connect4": "Future game UI",
+        "rps": "Future game UI",
+        "wordle": "Future game UI"
+      },
+      "page.tsx": "Home route",
+      "home.tsx": "Main landing page UI",
+      "games.tsx": "Games listing page",
+      "layout.tsx": "Global layout wrapper",
+      "globals.css": "Global styling"
+    },
+
+    "components": {
+      "GameLayout.tsx": "Reusable layout for games",
+      "Modal.tsx": "Generic modal dialog",
+      "Navbar.tsx": "Top navigation",
+      "RoomLobby.tsx": "Lobby UI for private rooms",
+      "ThemeToggle.tsx": "Dark/light theme switch",
+      "UsernameModal.tsx": "Prompt for username"
+    },
+
+    "lib": {
+      "multiplayerEngine.ts": "Socket communication abstraction layer",
+      "useGameState.ts": "React hook syncing multiplayer state",
+      "socket.ts": "Singleton Socket.IO client",
+      "player.ts": "Local player utility",
+      "useUsername.ts": "Stores username in localStorage"
+    },
+
+    "server": {
+      "socket.js": "Main multiplayer server",
+      "games": {
+        "tictactoe.js": "Game logic module"
+      }
+    }
+  },
+
+  "architecture": {
+    "layers": [
+      "Game UI",
+      "RoomLobby",
+      "useGameState hook",
+      "multiplayerEngine",
+      "Socket.IO client",
+      "Socket.IO server",
+      "Game modules"
+    ],
+    "flow": "Client UI → useGameState → multiplayerEngine → socket client → socket server → game module → broadcast back to clients"
+  },
+
+  "multiplayer_engine": {
+    "responsibility": "Handle realtime communication between players",
+    "communication_protocol": "Socket.IO",
+    "design_pattern": "Game plugins loaded dynamically",
+    "game_loader": "Server dynamically loads all JS files inside server/games directory"
+  },
+
+  "player_registry": {
+    "structure": "Map(socketId -> playerObject)",
+    "playerObject": {
+      "socket": "socket instance",
+      "username": "player name",
+      "roomId": "current room id"
+    }
+  },
+
+  "queues": {
+    "purpose": "Random matchmaking",
+    "structure": "queues[game] = array of socketIds",
+    "logic": "Players enter queue and are paired when at least two are waiting"
+  },
+
+  "sessions": {
+    "purpose": "Active game rooms",
+    "structure": {
+      "game": "game type",
+      "players": "[usernameA, usernameB]",
+      "state": "game state object",
+      "createdAt": "timestamp",
+      "reconnectTimer": "disconnect timeout",
+      "rematchRequests": "object tracking rematch votes"
+    }
+  },
+
+  "room_lifecycle": [
+    "Player connects",
+    "Player joins matchmaking OR creates room",
+    "Room created",
+    "Second player joins",
+    "Game starts",
+    "Moves exchanged",
+    "Game ends",
+    "Optional rematch",
+    "Room closed"
+  ],
+
+  "socket_events": {
+    "client_to_server": [
+      "joinGame",
+      "createRoom",
+      "joinRoom",
+      "move",
+      "turnTimeout",
+      "leaveRoom",
+      "requestRematch",
+      "reconnectGame"
+    ],
+
+    "server_to_client": [
+      "onlineCount",
+      "roomCreated",
+      "gameStart",
+      "move",
+      "turnUpdate",
+      "gameOver",
+      "rematchStart",
+      "opponentRematchRequested",
+      "opponentDisconnected",
+      "opponentReconnected",
+      "opponentLeft",
+      "reconnectSuccess"
+    ]
+  },
+
+  "private_rooms": {
+    "creation": "Player emits createRoom",
+    "join": "Second player joins using joinRoom with roomId",
+    "room_code": "Generated using nanoid(6)",
+    "invite_link": "Current page URL + ?room=ROOMID",
+    "creator_detection": "Stored in sessionStorage as roomCreator"
+  },
+
+  "disconnect_handling": {
+    "flow": [
+      "Player disconnects",
+      "Opponent notified",
+      "Reconnect timer (15s) starts",
+      "If player reconnects game resumes",
+      "If timeout expires opponent wins and room closes"
+    ]
+  },
+
+  "rematch_system": {
+    "mechanism": "Both players must request rematch",
+    "tracking": "session.rematchRequests",
+    "reset_logic": "Game state recreated using createGame()"
+  },
+
+  "game_plugin_interface": {
+    "required_functions": {
+      "createGame": "returns initial game state",
+      "makeMove": "validates and performs move",
+      "checkWinner": "returns winner or draw"
+    }
+  },
+
+  "tic_tac_toe_game_module": {
+    "state": {
+      "board": "Array(9)",
+      "turn": "0 or 1"
+    },
+    "marks": {
+      "player0": "P",
+      "player1": "O"
+    },
+    "win_patterns": [
+      [0, 1, 2],
+      [3, 4, 5],
+      [6, 7, 8],
+      [0, 3, 6],
+      [1, 4, 7],
+      [2, 5, 8],
+      [0, 4, 8],
+      [2, 4, 6]
+    ]
+  },
+
+  "frontend_state": {
+    "board": "Current board",
+    "playerTurn": "Whether player can move",
+    "opponentName": "Opponent username",
+    "searching": "Waiting for match",
+    "multiplayer": "Game started",
+    "winner": "Game winner",
+    "roomLink": "Invite link if creator",
+    "hasPrivateRoom": "Boolean(roomLink || roomFromUrl)"
+  },
+
+  "gameplay_rules": {
+    "validation": [
+      "Index must be within board range",
+      "Cell must be empty",
+      "Player must match current turn"
+    ],
+    "turn_timer": "30 seconds",
+    "win_detection": "Server side"
+  },
+
+  "security_model": {
+    "authoritative_server": "Server validates moves",
+    "client_cannot_modify_state": "Clients only send move index",
+    "server_updates_state": "Server modifies board and broadcasts result"
+  },
+
+  "development_rules": [
+    "Game UI should stay inside game components",
+    "Socket communication must go through multiplayerEngine",
+    "Game logic belongs only in server/games modules",
+    "UI components should not directly use sockets",
+    "Server always remains authoritative"
+  ],
+
+  "future_features": [
+    "Spectator mode",
+    "Public room browser",
+    "Game statistics",
+    "Mobile sharing",
+    "More game plugins",
+    "Tournament system"
+  ]
+}
