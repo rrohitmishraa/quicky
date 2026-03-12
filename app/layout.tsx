@@ -3,6 +3,7 @@ import { Montserrat } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import ClientInitializer from "@/components/ClientInitializer";
+import UsernameGuard from "@/components/UsernameGuard"
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -39,6 +40,7 @@ export default function RootLayout({
 
       <body className={`${montserrat.variable} antialiased`}>
         <ClientInitializer />
+        <UsernameGuard />
         <Navbar />
         <main>{children}</main>
       </body>

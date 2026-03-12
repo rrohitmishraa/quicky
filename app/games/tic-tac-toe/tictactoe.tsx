@@ -4,11 +4,11 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 
 import { useGameState } from "@/lib/useGameState";
-import { useUsername } from "@/lib/useUsername";
 import { getSocket } from "@/lib/socket";
 import Modal from "@/components/Modal";
 
 import RoomLobby from "@/components/RoomLobby";
+import { useUsernameStore } from "@/lib/useUsernameStore";
 
 import { useSearchParams } from "next/navigation";
 import { getCurrentRoom, joinPrivateRoom, createPrivateRoom } from "@/lib/multiplayerEngine";
@@ -31,7 +31,7 @@ const winPatterns = [
 
 
 export default function TicTacToe() {
-  const username = useUsername();
+  const username = useUsernameStore() || "";
 
   const [timer, setTimer] = useState(TURN_TIME);
   const [winningCells, setWinningCells] = useState<number[]>([]);
