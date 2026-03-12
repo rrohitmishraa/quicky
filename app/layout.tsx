@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import ClientInitializer from "@/components/ClientInitializer";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -16,35 +17,30 @@ export const metadata: Metadata = {
   },
 };
 
-
-
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
             __html: `
-      const theme = localStorage.getItem("theme");
-      if (theme === "dark") {
-        document.documentElement.classList.add("dark");
-      }
-    `,
+              const theme = localStorage.getItem("theme");
+              if (theme === "dark") {
+                document.documentElement.classList.add("dark");
+              }
+            `,
           }}
         />
       </head>
+
       <body className={`${montserrat.variable} antialiased`}>
-
+        <ClientInitializer />
         <Navbar />
-
-        <main className="pt-0">
-          {children}
-        </main>
-
+        <main>{children}</main>
       </body>
     </html>
   );

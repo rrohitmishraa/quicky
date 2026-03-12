@@ -25,6 +25,7 @@ const io = new Server(httpServer, {
 /* ---------------- PLAYER REGISTRY ---------------- */
 
 const players = new Map();
+const playersByUsername = new Map();
 
 /*
 socketId → {
@@ -41,6 +42,7 @@ const queues = {};
 /* ---------------- GAME SESSIONS ---------------- */
 
 const sessions = {};
+const sessionsBySocket = new Map();
 
 function startTurnTimer(roomId) {
   const session = sessions[roomId];
@@ -65,13 +67,11 @@ function startTurnTimer(roomId) {
 
 function broadcastOnlineCount() {
   io.emit("onlineCount", players.size);
+  // io.emit("onlineCount", playersByUsername.size);
 }
 
 function getPlayerByUsername(username) {
-  for (const player of players.values()) {
-    if (player.username === username) return player;
-  }
-  return null;
+  return playersByUsername.get(username) || null;
 }
 
 /* ---------------- CLEAN QUEUE ---------------- */
@@ -115,6 +115,9 @@ function createRoom(game, playerA, playerB) {
   playerA.roomId = roomId;
   playerB.roomId = roomId;
 
+  sessionsBySocket.set(playerA.socket.id, roomId);
+  sessionsBySocket.set(playerB.socket.id, roomId);
+
   playerA.socket.join(roomId);
   playerB.socket.join(roomId);
 
@@ -130,33 +133,33 @@ function createRoom(game, playerA, playerB) {
 
 /* ---------------- MATCHMAKING ---------------- */
 
-function tryMatchmaking(game) {
-  if (!queues[game]) return;
+// function tryMatchmaking(game) {
+//   if (!queues[game]) return;
 
-  // ensure queue only contains valid players
-  cleanQueue(game);
-  const queue = queues[game];
+//   // ensure queue only contains valid players
+//   cleanQueue(game);
+//   const queue = queues[game];
 
-  console.log("QUEUE STATE:", queue);
+//   console.log("QUEUE STATE:", queue);
 
-  while (queue.length >= 2) {
-    const idA = queue.shift();
-    const idB = queue.shift();
+//   while (queue.length >= 2) {
+//     const idA = queue.shift();
+//     const idB = queue.shift();
 
-    const playerA = players.get(idA);
-    const playerB = players.get(idB);
+//     const playerA = players.get(idA);
+//     const playerB = players.get(idB);
 
-    if (!playerA || !playerB) {
-      console.log("Invalid players in queue, cleaning and retrying");
-      cleanQueue(game);
-      continue;
-    }
+//     if (!playerA || !playerB) {
+//       console.log("Invalid players in queue, cleaning and retrying");
+//       cleanQueue(game);
+//       continue;
+//     }
 
-    console.log("MATCH FOUND:", playerA.username, "vs", playerB.username);
+//     console.log("MATCH FOUND:", playerA.username, "vs", playerB.username);
 
-    createRoom(game, playerA, playerB);
-  }
-}
+//     createRoom(game, playerA, playerB);
+//   }
+// }
 
 /* ---------------- SOCKET CONNECTION ---------------- */
 
@@ -169,39 +172,55 @@ io.on("connection", (socket) => {
     roomId: null,
   });
 
+  // send count immediately to this client
+  socket.emit("onlineCount", players.size);
+
+  // broadcast to everyone else
   broadcastOnlineCount();
+
+  /* ---------------- ONLINE COUNT REQUEST ---------------- */
+
+  // client can request current online count (fixes race condition
+  // where the event fires before the listener is attached)
+  socket.on("getOnlineCount", () => {
+    socket.emit("onlineCount", players.size);
+  });
 
   /* ---------------- JOIN GAME ---------------- */
 
   socket.on("joinGame", ({ game, username }) => {
-    console.log("JOIN GAME RECEIVED:", username, game);
     const player = players.get(socket.id);
-
     if (!player) return;
-
-    // if player thinks they are in a room but the session no longer exists, clear it
-    if (player.roomId && !sessions[player.roomId]) {
-      player.roomId = null;
-    }
-
-    // if still in a valid room, do not allow joining queue again
     if (player.roomId) return;
 
     player.username = username;
+    playersByUsername.set(username, player);
 
     if (!queues[game]) queues[game] = [];
 
-    // remove stale or invalid queue entries
-    cleanQueue(game);
+    const queue = queues[game];
 
-    // prevent duplicate queue joins
-    if (!queues[game].includes(socket.id)) {
+    // remove invalid entries
+    queues[game] = queue.filter((id) => {
+      const p = players.get(id);
+      return p && p.roomId === null;
+    });
+
+    const waitingPlayerId = queues[game].shift();
+
+    if (waitingPlayerId) {
+      const playerA = players.get(waitingPlayerId);
+      const playerB = player;
+
+      if (!playerA || playerA.roomId) {
+        queues[game].push(socket.id);
+        return;
+      }
+
+      createRoom(game, playerA, playerB);
+    } else {
       queues[game].push(socket.id);
     }
-
-    console.log("QUEUE", game, queues[game].length);
-
-    tryMatchmaking(game);
   });
 
   /* ---------------- RECONNECT GAME ---------------- */
@@ -216,6 +235,7 @@ io.on("connection", (socket) => {
     if (!player) return;
 
     player.username = username;
+    playersByUsername.set(username, player);
     player.roomId = roomId;
 
     socket.join(roomId);
@@ -368,6 +388,7 @@ io.on("connection", (socket) => {
     socket.leave(roomId);
 
     player.roomId = null;
+    sessionsBySocket.delete(socket.id);
 
     if (opponent) {
       opponent.socket.emit("opponentLeft");
@@ -382,8 +403,10 @@ io.on("connection", (socket) => {
   socket.on("createRoom", ({ game, username }) => {
     const player = players.get(socket.id);
     if (!player) return;
+    if (player.roomId) return;
 
     player.username = username;
+    playersByUsername.set(username, player);
 
     const roomId = nanoid(6);
 
@@ -397,6 +420,7 @@ io.on("connection", (socket) => {
     };
 
     player.roomId = roomId;
+    sessionsBySocket.set(socket.id, roomId);
 
     socket.join(roomId);
 
@@ -410,14 +434,18 @@ io.on("connection", (socket) => {
   socket.on("joinRoom", ({ roomId, username }) => {
     const session = sessions[roomId];
     if (!session) return;
+    if (!games[session.game]) return;
 
-    if (session.players.length >= 2) return;
+    if (session.players.length >= 2 || session.players.includes(username))
+      return;
 
     const player = players.get(socket.id);
     if (!player) return;
 
     player.username = username;
+    playersByUsername.set(username, player);
     player.roomId = roomId;
+    sessionsBySocket.set(socket.id, roomId);
 
     session.players.push(username);
 
@@ -446,7 +474,11 @@ io.on("connection", (socket) => {
 
     const username = player.username;
     const roomId = player.roomId;
+    sessionsBySocket.delete(socket.id);
 
+    if (player.username) {
+      playersByUsername.delete(player.username);
+    }
     players.delete(socket.id);
 
     broadcastOnlineCount();

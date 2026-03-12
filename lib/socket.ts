@@ -3,38 +3,51 @@
 import { io, Socket } from "socket.io-client";
 
 declare global {
-  var __socket: Socket | undefined;
+  interface Window {
+    __socket?: Socket;
+  }
 }
 
-export function getSocket(): Socket {
+const SERVER_URL =
+  process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:4000";
+
+function createSocket(): Socket {
   if (typeof window === "undefined") {
     return {} as Socket;
   }
 
   if (window.__socket) return window.__socket;
 
-  const SERVER_URL =
-    process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:4000";
-
-  window.__socket = io(SERVER_URL, {
-    transports: ["websocket"], // force websocket
+  const socket = io(SERVER_URL, {
+    transports: ["websocket"],
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,
   });
 
-  window.__socket.on("connect", () => {
-    console.log("Socket connected:", window.__socket?.id);
+  socket.on("connect", () => {
+    console.log("Socket connected:", socket.id);
   });
 
-  window.__socket.on("disconnect", (reason) => {
+  socket.on("disconnect", (reason) => {
     console.log("Socket disconnected:", reason);
   });
 
-  window.__socket.on("connect_error", (err) => {
+  socket.on("connect_error", (err) => {
     console.log("Socket connection error:", err.message);
   });
 
-  return window.__socket;
+  window.__socket = socket;
+
+  return socket;
+}
+
+export function getSocket(): Socket {
+  return createSocket();
+}
+
+/* Initialize socket immediately when this file loads */
+if (typeof window !== "undefined") {
+  createSocket();
 }
